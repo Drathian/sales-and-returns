@@ -43,6 +43,25 @@ for row in cursor.fetchall():
         "Ordrar:", row["AntalOrdrar"],
         "Plagg:", row["AntalPlagg"]
     )
+# Total försäljning under perioden
+query_total = """
+SELECT
+    COUNT(DISTINCT o.Id) AS AntalOrdrar,
+    SUM(pto.Quantity) AS AntalPlagg,
+    SUM(pto.Quantity * pto.UnitPrice) AS TotalForsaljning
+FROM COrder o
+JOIN ProductToOrder pto ON pto.OrderId = o.Id
+WHERE o.CreatedDate >= '2022-01-06'
+  AND o.CreatedDate < '2026-08-27';
+"""
+
+cursor.execute(query_total)
+total = cursor.fetchone()
+
+print("\nTOTALT FÖR PERIODEN")
+print("Antal ordrar:", total["AntalOrdrar"])
+print("Antal plagg:", total["AntalPlagg"])
+print("Total försäljning:", total["TotalForsaljning"])
 
 cursor.close()
 db.close()
