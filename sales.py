@@ -35,9 +35,12 @@ ORDER BY Stad, AntalPlagg DESC;
 
 # Kör frågan
 cursor.execute(query)
+sales_data = cursor.fetchall()
 
 # Skriv ut resultatet
-for row in cursor.fetchall():
+for row in sales_data:
+
+
     print(
         row["Stad"],
         row["Kategori"],
