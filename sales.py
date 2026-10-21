@@ -19,7 +19,8 @@ SELECT
     c.City AS Stad,
     pc.Name AS Kategori,
     COUNT(DISTINCT o.Id) AS AntalOrdrar,
-    SUM(pto.Quantity) AS AntalPlagg
+    SUM(pto.Quantity) AS AntalPlagg,
+SUM(pto.Quantity * pto.UnitPrice) AS Forsaljning
 FROM COrder o
 JOIN Customer c ON c.Id = o.CustomerId
 JOIN ProductToOrder pto ON pto.OrderId = o.Id
@@ -41,7 +42,8 @@ for row in cursor.fetchall():
         row["Stad"],
         row["Kategori"],
         "Ordrar:", row["AntalOrdrar"],
-        "Plagg:", row["AntalPlagg"]
+        "Plagg:", row["AntalPlagg"],
+        "Försäljning:", f'{row["Forsaljning"]:,.2f}'
     )
 # Total försäljning under perioden
 query_total = """
