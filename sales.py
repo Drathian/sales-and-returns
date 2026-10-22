@@ -1,72 +1,23 @@
-import mysql.connector
-from getpass import getpass
-
-db = mysql.connector.connect(
-    host="comet-direct.usbx.me",
-    port=17815,
-    user="yhstudent",
-    password=getpass("Databaslösenord: "),
-    database="clothingshop",
-    collation="utf8mb4_general_ci"
-)
-
-cursor = db.cursor(dictionary=True)
-print("Ansluten till MySQL:", db.is_connected())
-
-# HÄR börjar SQL-frågan
-query = """
-SELECT
-    c.City AS Stad,
-    pc.Name AS Kategori,
-    COUNT(DISTINCT o.Id) AS AntalOrdrar,
-    SUM(pto.Quantity) AS AntalPlagg,
-SUM(pto.Quantity * pto.UnitPrice) AS Forsaljning
-FROM COrder o
-JOIN Customer c ON c.Id = o.CustomerId
-JOIN ProductToOrder pto ON pto.OrderId = o.Id
-JOIN Variant v ON v.Id = pto.VariantId
-JOIN Product p ON p.Id = v.ProductId
-JOIN ProductCategory pc ON pc.Id = p.CategoryId
-WHERE o.CreatedDate >= '2022-01-06'
-  AND o.CreatedDate < '2026-08-27'
-GROUP BY c.City, pc.Id, pc.Name
-ORDER BY Stad, AntalPlagg DESC;
+# One row per order line (a product on an order), with its order, category and price info.
+# Notes for the report:
+# - Revenue is Quantity * UnitPrice, the price actually paid (after discounts), before refunds.
+# - Cost uses Product.Cost, which has no history, so margins for older orders use today's cost.
+# - Discounted = sold below the list price (ProductPrice) that applied on the order date.
+# - Products belong to a subcategory (e.g. Jeans); Category is its parent (e.g. Byxor).
+SALES_QUERY = """
+SELECT l.Id AS LineId, o.Id AS OrderId, o.CreatedDate AS OrderDate,
+       YEAR(o.CreatedDate) AS Year, MONTH(o.CreatedDate) AS Month, o.Source AS Channel,
+       COALESCE(parent.Name, cat.Name) AS Category, cat.Name AS SubCategory, p.Name AS Product,
+       l.Quantity, l.UnitPrice,
+       l.Quantity * l.UnitPrice AS Revenue,
+       l.Quantity * p.Cost AS Cost,
+       l.UnitPrice < (SELECT pp.Price FROM ProductPrice pp
+                      WHERE pp.ProductId = p.Id AND pp.StartDate <= o.CreatedDate
+                      ORDER BY pp.StartDate DESC LIMIT 1) AS Discounted
+FROM ProductToOrder l
+JOIN COrder o                    ON o.Id = l.OrderId
+JOIN Variant v                   ON v.Id = l.VariantId
+JOIN Product p                   ON p.Id = v.ProductId
+JOIN ProductCategory cat         ON cat.Id = p.CategoryId
+LEFT JOIN ProductCategory parent ON parent.Id = cat.ParentCategoryId
 """
-
-# Kör frågan
-cursor.execute(query)
-sales_data = cursor.fetchall()
-
-# Skriv ut resultatet
-for row in sales_data:
-
-
-    print(
-        row["Stad"],
-        row["Kategori"],
-        "Ordrar:", row["AntalOrdrar"],
-        "Plagg:", row["AntalPlagg"],
-        "Försäljning:", f'{row["Forsaljning"]:,.2f}'
-    )
-# Total försäljning under perioden
-query_total = """
-SELECT
-    COUNT(DISTINCT o.Id) AS AntalOrdrar,
-    SUM(pto.Quantity) AS AntalPlagg,
-    SUM(pto.Quantity * pto.UnitPrice) AS TotalForsaljning
-FROM COrder o
-JOIN ProductToOrder pto ON pto.OrderId = o.Id
-WHERE o.CreatedDate >= '2022-01-06'
-  AND o.CreatedDate < '2026-08-27';
-"""
-
-cursor.execute(query_total)
-total = cursor.fetchone()
-
-print("\nTOTALT FÖR PERIODEN")
-print("Antal ordrar:", total["AntalOrdrar"])
-print("Antal plagg:", total["AntalPlagg"])
-print("Total försäljning:", total["TotalForsaljning"])
-
-cursor.close()
-db.close()
