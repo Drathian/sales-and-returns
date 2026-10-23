@@ -6,6 +6,8 @@ Creates an analytics report (PDF) on sales, returns and customers from the cloth
 
 | File | What it does |
 |---|---|
+| `Download Report.bat` | Double-click it to open the report program |
+| `app.py` | The program window: progress bar, preview of the report and a **Download PDF** button |
 | `main.py` | Joins the data, works out the numbers and findings, and saves the PDF |
 | `sales.py` | SQL for what was sold (one row per order line) |
 | `customer.py` | SQL for who placed each order |
@@ -28,12 +30,7 @@ python main.py
 
 `python main.py` takes about half a minute, saves the report as `Sales_and_Returns_Report.pdf` in your **Downloads** folder and opens it. Close the PDF before running it again, otherwise Windows won't let Python replace it.
 
-You only need the first and third lines once. Next time, just run:
-
-```
-.venv\Scripts\activate
-python main.py
-```
+You only need the first three lines once (run `pip install -r requirements.txt` again if requirements.txt changes). After that, the easiest way is to **double-click `Download Report.bat`** in File Explorer. No VS Code or terminal needed: the program makes the report (the bar goes from 0% to 100%), shows a preview of every page, and **Download PDF** saves it in your Downloads folder.
 
 **If activate gives a red error about "running scripts is disabled"**, run this once and try again:
 

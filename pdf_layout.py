@@ -273,8 +273,8 @@ def stacked_columns(labels, series, title):
 
 # ---------- The document ----------
 
-def build_pdf(path, story, title):
-    """Write the story (list of PDF parts) to a file with a footer on every page."""
+def build_pdf(target, story, title):
+    """Write the story (list of PDF parts) to a file name or file object, with a footer on every page."""
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setStrokeColor(colors.HexColor(GRID))
@@ -286,6 +286,6 @@ def build_pdf(path, story, title):
         canvas.drawRightString(A4[0] - MARGIN, 9 * mm, f"Page {doc.page}")
         canvas.restoreState()
 
-    doc = SimpleDocTemplate(path, pagesize=A4, title=title, leftMargin=MARGIN, rightMargin=MARGIN,
+    doc = SimpleDocTemplate(target, pagesize=A4, title=title, leftMargin=MARGIN, rightMargin=MARGIN,
                             topMargin=MARGIN, bottomMargin=20 * mm)
     doc.build(story, onFirstPage=footer, onLaterPages=footer)

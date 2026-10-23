@@ -1,4 +1,5 @@
 """Creates the sales and returns report as a PDF. Run: python main.py
+(or double-click "Download Report.bat" for a window with a preview, see app.py)
 
 The data files each hold the SQL for one part of the database:
     sales.py     what was sold (one row per order line)
@@ -7,6 +8,7 @@ The data files each hold the SQL for one part of the database:
 main.py joins them, works out the numbers and findings, and pdf_layout.py draws the pages.
 """
 import calendar
+import io
 import os
 from collections import Counter
 from datetime import date
@@ -59,10 +61,30 @@ MEASURES = """
 
 
 def breakdown(by=None, where="TRUE", order="Revenue DESC"):
-    """Return MEASURES with one row per value of `by`, or a single total row if `by` is None."""
+    """SQL for MEASURES with one row per value of `by`, or a single total row if `by` is None."""
     select = f"{by}, {MEASURES}" if by else MEASURES
     group = f"GROUP BY {by} ORDER BY {order}" if by else ""
-    return fetch_all(f"SELECT {select} FROM ({ORDER_LINES}) order_lines WHERE {where} {group}")
+    return f"SELECT {select} FROM ({ORDER_LINES}) order_lines WHERE {where} {group}"
+
+
+# Every query the report needs. load_data() runs them one by one so the progress bar can count them.
+QUERIES = {
+    "total": breakdown(),
+    "years": breakdown("Year", order="Year"),
+    # 1 January up to the day of the latest order, every year: compares a year that isn't over yet
+    "same_dates": breakdown("Year", order="Year", where="DATE_FORMAT(OrderDate, '%m-%d') <= "
+                                                      "(SELECT DATE_FORMAT(MAX(CreatedDate), '%m-%d') FROM COrder)"),
+    "months": breakdown("Year, Month", order="Year, Month"),
+    "categories": breakdown("Category"),
+    "discounts": breakdown("Discounted"),
+    "channels": breakdown("Channel"),
+    "subcategories": breakdown("Category, SubCategory", order="ReturnRate DESC"),
+    "reasons": REASON_SUMMARY_QUERY,
+    "outcomes": OUTCOME_SUMMARY_QUERY,
+    "cities": breakdown("City"),
+    "city_categories": breakdown("City, Category"),
+    "ages": breakdown("AgeGroup", order="AgeGroup"),
+}
 
 
 def column(rows, key, scale=1):
@@ -106,13 +128,12 @@ def summary_page(total, years, key_findings):
     ]
 
 
-def sales_section(total, years):
+def sales_section(data):
     """Revenue over time and by category, discount and channel."""
+    total, years, months = data["total"], data["years"], data["months"]
+    categories, channels = data["categories"], data["channels"]
+    discounts = {row["Discounted"]: row for row in data["discounts"]}
     latest = total["LastOrder"]
-    months = breakdown("Year, Month", order="Year, Month")
-    categories = breakdown("Category")
-    discounts = {row["Discounted"]: row for row in breakdown("Discounted")}
-    channels = breakdown("Channel")
 
     full_years = [row for row in years if not is_partial(row["Year"], latest)]
     first, last, this_year = full_years[0], full_years[-1], years[-1]
@@ -199,11 +220,10 @@ def sales_section(total, years):
     return [growth, discount], pages
 
 
-def returns_section(total):
+def returns_section(data):
     """Why items are sent back, which items, and what happens to the returns."""
-    reasons = fetch_all(REASON_SUMMARY_QUERY)
-    outcomes = fetch_all(OUTCOME_SUMMARY_QUERY)
-    subcategories = breakdown("Category, SubCategory", order="ReturnRate DESC")[:10]
+    total, reasons, outcomes = data["total"], data["reasons"], data["outcomes"]
+    subcategories = data["subcategories"][:10]
 
     return_count = sum(row["Returns"] for row in reasons)
     size_returns = sum(row["Returns"] for row in reasons if row["ReturnReason"] in SIZE_REASONS)
@@ -254,12 +274,11 @@ def returns_section(total):
     return [fit, handling], pages
 
 
-def customers_section(total, years):
+def customers_section(data):
     """New and returning customers, cities and age groups."""
+    total, years, cities, ages = data["total"], data["years"], data["cities"], data["ages"]
+    city_categories = data["city_categories"]
     latest = total["LastOrder"]
-    cities = breakdown("City")
-    city_categories = breakdown("City, Category")
-    ages = breakdown("AgeGroup", order="AgeGroup")
 
     returning = [row["Customers"] - row["NewCustomers"] for row in years]
     repeat = (
@@ -361,34 +380,52 @@ def notes_page(total):
                        [WIDTH * 0.26, WIDTH * 0.74], numbers=False)]
 
 
-def main():
-    print("Fetching data from the database, this takes about half a minute...")
-    total = breakdown()[0]
-    latest = total["LastOrder"]
-    years = breakdown("Year", order="Year")
-    same_dates = breakdown("Year", where=f"DATE_FORMAT(OrderDate, '%m-%d') <= '{latest:%m-%d}'", order="Year")
+def load_data(update):
+    """Run every query in QUERIES and work out the growth per year."""
+    data = {}
+    for number, (name, query) in enumerate(QUERIES.items()):
+        update(90 * number / len(QUERIES), f"Fetching data from the database ({number + 1} of {len(QUERIES)})...")
+        data[name] = fetch_all(query)
+    data["total"] = data["total"][0]
+    latest, years = data["total"]["LastOrder"], data["years"]
     # Compare each year with the year before. A year that isn't over yet is compared with
     # the same dates the year before.
     for i in range(1, len(years)):
-        years[i]["Previous"] = same_dates[i - 1] if is_partial(years[i]["Year"], latest) else years[i - 1]
+        years[i]["Previous"] = data["same_dates"][i - 1] if is_partial(years[i]["Year"], latest) else years[i - 1]
         years[i]["Growth"] = years[i]["Revenue"] / years[i]["Previous"]["Revenue"] - 1
+    return data
 
-    sales_findings, sales_pages = sales_section(total, years)
-    returns_findings, returns_pages = returns_section(total)
-    customer_findings, customer_pages = customers_section(total, years)
 
-    print("Drawing the PDF...")
-    story = (summary_page(total, years, sales_findings + returns_findings + customer_findings)
-             + sales_pages + returns_pages + customer_pages + notes_page(total))
+def print_progress(percent, message):
+    print(f"{percent:3.0f}%  {message}")
+
+
+def make_report(update=print_progress):
+    """Make the report and return the PDF file as bytes. update(percent, message) is called
+    as it goes: it prints the progress, or moves the progress bar in app.py."""
+    data = load_data(update)
+    update(90, "Drawing the charts and pages...")
+    sales_findings, sales_pages = sales_section(data)
+    returns_findings, returns_pages = returns_section(data)
+    customer_findings, customer_pages = customers_section(data)
+    story = (summary_page(data["total"], data["years"], sales_findings + returns_findings + customer_findings)
+             + sales_pages + returns_pages + customer_pages + notes_page(data["total"]))
+    pdf = io.BytesIO()
+    build_pdf(pdf, story, TITLE)
+    update(100, "The report is ready.")
+    return pdf.getvalue()
+
+
+def save_report(pdf):
+    """Save the PDF in Downloads and open it. Returns a message saying how it went."""
     try:
-        build_pdf(str(REPORT_FILE), story, TITLE)
+        REPORT_FILE.write_bytes(pdf)
     except PermissionError:
-        print(f"Couldn't save {REPORT_FILE}. Close the PDF if it's open and run again.")
-        return
-    print(f"Saved the report as {REPORT_FILE}")
+        return f"Couldn't save {REPORT_FILE}. Close the PDF if it's open and try again."
     if hasattr(os, "startfile"):  # Windows: open it, like double-clicking the file
         os.startfile(REPORT_FILE)
+    return f"Saved the report as {REPORT_FILE}"
 
 
 if __name__ == "__main__":
-    main()
+    print(save_report(make_report()))
